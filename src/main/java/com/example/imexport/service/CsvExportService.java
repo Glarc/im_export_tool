@@ -49,13 +49,14 @@ public class CsvExportService {
         ExportTaskHistory task = createTask(provider.getBusinessType(), params, createdBy);
         
         try {
-            // 执行导出
-            String fileUrl = doExport(provider, params);
+            // 执行导出并获取结果
+            ExportResult<T> result = doExport(provider, params);
             
             // 更新任务状态
-            updateTaskSuccess(task.getId(), fileUrl, 0);
+            updateTaskSuccess(task.getId(), result.getFileUrl(), result.getTotalRows());
             
-            logger.info("CSV导出任务完成: taskId={}, fileUrl={}", task.getId(), fileUrl);
+            logger.info("CSV导出任务完成: taskId={}, fileUrl={}, rows={}", 
+                task.getId(), result.getFileUrl(), result.getTotalRows());
             return task.getId();
             
         } catch (Exception e) {
@@ -73,9 +74,9 @@ public class CsvExportService {
         ExportTaskHistory task = createTask(provider.getBusinessType(), params, createdBy);
         
         try {
-            String fileUrl = doExport(provider, params);
-            updateTaskSuccess(task.getId(), fileUrl, 0);
-            return fileUrl;
+            ExportResult<T> result = doExport(provider, params);
+            updateTaskSuccess(task.getId(), result.getFileUrl(), result.getTotalRows());
+            return result.getFileUrl();
         } catch (Exception e) {
             logger.error("CSV导出任务失败: taskId={}", task.getId(), e);
             updateTaskFailed(task.getId(), e.getMessage());
@@ -86,11 +87,13 @@ public class CsvExportService {
     /**
      * 核心导出逻辑
      */
-    private <T> String doExport(CsvExportProvider<T> provider, Object params) {
+    private <T> ExportResult<T> doExport(CsvExportProvider<T> provider, Object params) {
         // 查询数据
         List<T> data = provider.queryExportData(params);
         
-        if (data == null || data.isEmpty()) {
+        int totalRows = (data != null) ? data.size() : 0;
+        
+        if (totalRows == 0) {
             logger.warn("导出数据为空: businessType={}", provider.getBusinessType());
         }
 
@@ -111,8 +114,9 @@ public class CsvExportService {
         ByteArrayInputStream inputStream = new ByteArrayInputStream(outputStream.toByteArray());
         String fileUrl = fileStorageService.uploadFile(inputStream, fileName, "text/csv");
 
-        logger.info("CSV导出文件生成成功: fileUrl={}, rows={}", fileUrl, data != null ? data.size() : 0);
-        return fileUrl;
+        logger.info("CSV导出文件生成成功: fileUrl={}, rows={}", fileUrl, totalRows);
+        
+        return new ExportResult<>(fileUrl, totalRows);
     }
 
     /**
@@ -158,5 +162,26 @@ public class CsvExportService {
         task.setUpdatedTime(LocalDateTime.now());
         
         exportTaskHistoryMapper.updateById(task);
+    }
+    
+    /**
+     * 导出结果包装类
+     */
+    private static class ExportResult<T> {
+        private final String fileUrl;
+        private final int totalRows;
+        
+        public ExportResult(String fileUrl, int totalRows) {
+            this.fileUrl = fileUrl;
+            this.totalRows = totalRows;
+        }
+        
+        public String getFileUrl() {
+            return fileUrl;
+        }
+        
+        public int getTotalRows() {
+            return totalRows;
+        }
     }
 }

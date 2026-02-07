@@ -87,7 +87,7 @@ public class CsvUtils {
      */
     private static <T> T parseRow(String[] row, Class<T> modelClass, String[] headers) {
         try {
-            T instance = modelClass.newInstance();
+            T instance = modelClass.getDeclaredConstructor().newInstance();
             Field[] fields = modelClass.getDeclaredFields();
             
             for (int i = 0; i < Math.min(row.length, headers.length); i++) {
@@ -104,6 +104,9 @@ public class CsvUtils {
             
             return instance;
         } catch (Exception e) {
+            // Log parsing failure with details
+            System.err.println("Failed to parse CSV row at index " + 
+                java.util.Arrays.toString(row) + ": " + e.getMessage());
             return null;
         }
     }
@@ -124,7 +127,9 @@ public class CsvUtils {
                 row[i] = value != null ? value.toString() : "";
             }
         } catch (Exception e) {
-            // 忽略异常，返回部分填充的数组
+            // Log conversion failure with details
+            System.err.println("Failed to convert object to CSV row: " + 
+                item.getClass().getName() + " - " + e.getMessage());
         }
         
         return row;

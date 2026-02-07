@@ -157,7 +157,10 @@ public class CsvImportService {
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             
-            // 创建包含错误信息的数据
+            // 构建表头：行号 + 错误信息 + 原始列名
+            String[] errorHeaders = buildErrorHeaders(processor.getCsvHeaders());
+
+            // 创建包含错误信息的数据列表
             List<String[]> errorData = new ArrayList<>();
             for (ExcelRowError<T> error : errorRows) {
                 // 构建错误行: 行号 + 错误信息 + 原始数据
@@ -165,11 +168,16 @@ public class CsvImportService {
                 errorData.add(errorRow);
             }
 
-            // 构建表头：行号 + 错误信息 + 原始列名
-            String[] errorHeaders = buildErrorHeaders(processor.getCsvHeaders());
-
-            // 写入 CSV
-            CsvUtils.writeCsv(outputStream, convertToObjectList(errorData), errorHeaders);
+            // 手动写入 CSV
+            try (java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8)) {
+                // 写入表头
+                writer.write(String.join(",", errorHeaders) + "\n");
+                
+                // 写入错误数据
+                for (String[] row : errorData) {
+                    writer.write(String.join(",", escapeCsvFields(row)) + "\n");
+                }
+            }
 
             // 上传到 OSS
             String fileName = "error_" + processor.getBusinessType() + "_" + 
@@ -188,15 +196,25 @@ public class CsvImportService {
     }
 
     /**
-     * 构建错误行数组
+     * 构建错误行数组（包含行号、错误信息和原始数据）
      */
     private <T> String[] buildErrorRow(ExcelRowError<T> error, int originalColumnCount) {
         String[] row = new String[originalColumnCount + 2];
         row[0] = String.valueOf(error.getRowIndex());
         row[1] = error.getErrorMessage();
         
-        // 添加原始数据（简化处理，实际应该根据反射获取字段值）
-        // 这里留空，实际使用时需要根据具体模型处理
+        // 添加原始数据
+        T rowData = error.getRowData();
+        try {
+            java.lang.reflect.Field[] fields = rowData.getClass().getDeclaredFields();
+            for (int i = 0; i < Math.min(fields.length, originalColumnCount); i++) {
+                fields[i].setAccessible(true);
+                Object value = fields[i].get(rowData);
+                row[i + 2] = value != null ? value.toString() : "";
+            }
+        } catch (Exception e) {
+            logger.warn("无法提取错误行原始数据: {}", e.getMessage());
+        }
         
         return row;
     }
@@ -213,10 +231,22 @@ public class CsvImportService {
     }
 
     /**
-     * 将字符串数组列表转换为对象列表（用于 CsvUtils）
+     * 转义 CSV 字段（处理包含逗号、引号、换行符的字段）
      */
-    private List<Object> convertToObjectList(List<String[]> data) {
-        return new ArrayList<>(data);
+    private String[] escapeCsvFields(String[] fields) {
+        String[] escaped = new String[fields.length];
+        for (int i = 0; i < fields.length; i++) {
+            String field = fields[i];
+            if (field == null) {
+                escaped[i] = "";
+            } else if (field.contains(",") || field.contains("\"") || field.contains("\n")) {
+                // 需要引号包裹，并转义内部引号
+                escaped[i] = "\"" + field.replace("\"", "\"\"") + "\"";
+            } else {
+                escaped[i] = field;
+            }
+        }
+        return escaped;
     }
 
     /**
